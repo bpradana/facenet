@@ -1,0 +1,22 @@
+[project]
+name = "facenet"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "lightning>=2.5.5",
+    "torch>=2.9.0",
+    "torchvision>=0.24.0",
+    "pyyaml>=6.0.0",
+    "torchmetrics>=1.6.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["facenet*"]
