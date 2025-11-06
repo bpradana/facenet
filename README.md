@@ -83,6 +83,7 @@ curl -X POST http://localhost:8000/verify \
 ```
 
 The API returns cosine similarity scores and match decisions.
+If you set `detector_weights` in `configs/inference.yaml` to a local Ultralytics YOLO face-detector checkpoint (e.g. `yolov8n-face.pt`), incoming images are cropped to the strongest detected face before embedding.
 
 ## Gradio verification demo
 
@@ -92,7 +93,8 @@ Launch an interactive UI for manual image comparison:
 python scripts/gradio_verify.py --config configs/inference.yaml
 ```
 
-Upload two face crops and adjust the cosine threshold to see match results.
+Upload two photos (full frames are fine); the app will optionally run YOLO-based face detection using the configured weights, crop the faces, and report cosine similarity versus the chosen threshold.
+If detection is active, the UI renders bounding boxes using Roboflow Supervision for quick visual confirmation.
 
 ## Production considerations
 

@@ -13,3 +13,4 @@ wheels/
 artifacts/
 dataset/
 .ruff_cache/
+model/

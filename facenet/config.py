@@ -137,9 +137,13 @@ class InferenceConfig:
     num_workers: int = 2
     image_size: int = 160
     detection_threshold: float = 0.8
+    detector_weights: Optional[str] = None
+    detector_confidence: float = 0.3
 
     def __post_init__(self) -> None:
         self.checkpoint_path = str(Path(self.checkpoint_path))
+        if self.detector_weights:
+            self.detector_weights = str(Path(self.detector_weights))
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

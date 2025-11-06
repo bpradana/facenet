@@ -1,7 +1,9 @@
-checkpoint_path: artifacts/checkpoints/facenet-epoch=19-val_loss=0.1000.ckpt
+checkpoint_path: model/facenet.ckpt
 device: cpu
 normalize_embeddings: true
 batch_size: 32
 num_workers: 2
 image_size: 160
 detection_threshold: 0.8
+detector_weights: model/yolov8n-face.pt
+detector_confidence: 0.3

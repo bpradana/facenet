@@ -4,16 +4,28 @@ from __future__ import annotations
 
 import base64
 import io
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 
+import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from ..config import InferenceConfig, ModelConfig, OptimizerConfig, SchedulerConfig
 from ..data.transforms import build_eval_transform
 from ..models.lightning_module import FaceNetLightningModule
+
+try:
+    from ultralytics import YOLO
+except ImportError:  # pragma: no cover - optional dependency
+    YOLO = None
+
+try:
+    import supervision as sv
+except ImportError:  # pragma: no cover - optional dependency
+    sv = None
 
 
 def _load_model_from_checkpoint(
@@ -63,10 +75,81 @@ class EmbeddingService:
         self.device = torch.device(cfg.device)
         self.model = _load_model_from_checkpoint(cfg.checkpoint_path, self.device)
         self.transform = build_eval_transform(cfg.image_size)
+        self.detector = self._load_detector()
+        self.box_annotator = (
+            sv.BoxAnnotator() if self.detector is not None and sv is not None else None
+        )
 
-    def _preprocess_image(self, image: Image.Image) -> torch.Tensor:
-        img = image.convert("RGB")
-        return self.transform(img).unsqueeze(0).to(self.device)
+    def _load_detector(self) -> Optional["YOLO"]:
+        if not self.cfg.detector_weights:
+            return None
+        if YOLO is None or sv is None:
+            raise ImportError(
+                "ultralytics and supervision must be installed to use face detection."
+            )
+        weights_path = Path(self.cfg.detector_weights)
+        if not weights_path.exists():
+            raise FileNotFoundError(f"Detector weights not found at {weights_path}.")
+        detector = YOLO(str(weights_path))
+        try:
+            detector.to(str(self.device))
+        except Exception:  # pragma: no cover - fallback to default device
+            pass
+        return detector
+
+    def _preprocess_image(
+        self, image: Image.Image, *, return_visual: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, Image.Image]:
+        face, annotated = self._extract_face(image, draw=return_visual)
+        rgb = face.convert("RGB")
+        tensor = self.transform(rgb).unsqueeze(0).to(self.device)
+        if return_visual:
+            annotated_image = annotated or image
+            return tensor, annotated_image
+        return tensor
+
+    def _extract_face(
+        self, image: Image.Image, *, draw: bool = False
+    ) -> tuple[Image.Image, Optional[Image.Image]]:
+        if self.detector is None:
+            return image, image if draw else None
+
+        results = self.detector.predict(
+            image, conf=self.cfg.detector_confidence, verbose=False
+        )
+        if not results:
+            raise ValueError("Face detector returned no results.")
+        result = results[0]
+        detections = sv.Detections.from_ultralytics(result)
+        if detections.xyxy.size == 0:
+            raise ValueError("No face detected in the provided image.")
+
+        confidences = detections.confidence
+        if confidences.size == 0:
+            idx = 0
+        else:
+            idx = int(np.argmax(confidences))
+
+        x1, y1, x2, y2 = detections.xyxy[idx].astype(int)
+        width, height = image.size
+        x1 = max(0, min(width - 1, x1))
+        y1 = max(0, min(height - 1, y1))
+        x2 = max(x1 + 1, min(width, x2))
+        y2 = max(y1 + 1, min(height, y2))
+        face = image.crop((x1, y1, x2, y2))
+
+        annotated = None
+        if draw:
+            if self.box_annotator is None:
+                annotated = image
+            else:
+                scene = np.array(image.convert("RGB"))
+                annotated_scene = self.box_annotator.annotate(
+                    scene=scene, detections=detections
+                )
+                annotated = Image.fromarray(annotated_scene)
+
+        return face, annotated
 
     def _decode_image(self, image_b64: str) -> torch.Tensor:
         try:
@@ -77,7 +160,10 @@ class EmbeddingService:
             ) from exc
 
         with Image.open(io.BytesIO(image_bytes)) as img:
-            tensor = self._preprocess_image(img)
+            try:
+                tensor = self._preprocess_image(img)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         return tensor
 
     @torch.inference_mode()
@@ -87,7 +173,13 @@ class EmbeddingService:
 
     @torch.inference_mode()
     def embed_images(self, images: List[Image.Image]) -> torch.Tensor:
-        tensors = [self._preprocess_image(image) for image in images]
+        tensors = []
+        for image in images:
+            try:
+                tensor = self._preprocess_image(image)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            tensors.append(tensor)
         return self._embed_tensors(tensors)
 
     @torch.inference_mode()
@@ -101,6 +193,23 @@ class EmbeddingService:
     ) -> VerifyResponse:
         embeddings = self.embed_images([image_a, image_b])
         return self._verify_from_embeddings(embeddings, threshold)
+
+    @torch.inference_mode()
+    def verify_images_with_visuals(
+        self, image_a: Image.Image, image_b: Image.Image, threshold: float
+    ) -> tuple[VerifyResponse, List[Image.Image]]:
+        tensors: List[torch.Tensor] = []
+        visuals: List[Image.Image] = []
+        for image in (image_a, image_b):
+            try:
+                tensor, visual = self._preprocess_image(image, return_visual=True)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            tensors.append(tensor)
+            visuals.append(visual)
+        embeddings = self._embed_tensors(tensors)
+        response = self._verify_from_embeddings(embeddings, threshold)
+        return response, visuals
 
     def _embed_tensors(self, tensors: List[torch.Tensor]) -> torch.Tensor:
         batch = torch.cat(tensors, dim=0)

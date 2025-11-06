@@ -35,22 +35,27 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_interface(service: EmbeddingService) -> gr.Blocks:
-    def verify_faces(
-        image_a, image_b, threshold: float
-    ) -> Dict[str, Any]:
+    def verify_faces(image_a, image_b, threshold: float):
         if image_a is None or image_b is None:
-            return {"error": "Please upload two face images."}
-        result = service.verify_images(image_a, image_b, threshold)
-        return {
+            return None, None, {"error": "Please upload two face images."}
+        try:
+            result, visuals = service.verify_images_with_visuals(
+                image_a, image_b, threshold
+            )
+        except ValueError as exc:
+            return None, None, {"error": str(exc)}
+        response = {
             "similarity": round(result.similarity, 4),
             "threshold": threshold,
             "is_match": bool(result.is_match),
         }
+        annotated_a, annotated_b = visuals
+        return annotated_a, annotated_b, response
 
     with gr.Blocks(title="Face Verification (FaceNet)") as demo:
         gr.Markdown(
             "## Face Verification Demo\n"
-            "Upload two face images to compare embeddings using the trained FaceNet model."
+            "Images are auto-cropped with YOLO (if configured) before embedding."
         )
         with gr.Row():
             image_a = gr.Image(label="Image A", type="pil")
@@ -62,12 +67,15 @@ def build_interface(service: EmbeddingService) -> gr.Blocks:
             step=0.01,
             label="Cosine Similarity Threshold",
         )
+        with gr.Row():
+            annotated_a = gr.Image(label="Detected Faces A")
+            annotated_b = gr.Image(label="Detected Faces B")
         output = gr.JSON(label="Verification Result")
         verify_btn = gr.Button("Verify")
         verify_btn.click(
             fn=verify_faces,
             inputs=[image_a, image_b, threshold],
-            outputs=output,
+            outputs=[annotated_a, annotated_b, output],
         )
     return demo
 

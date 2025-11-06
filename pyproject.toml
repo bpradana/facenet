@@ -12,7 +12,10 @@ dependencies = [
     "torchmetrics>=1.6.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "ultralytics>=8.2.0",
     "gradio>=4.44.0",
+    "supervision>=0.26.1",
+    "omegaconf>=2.3.0",
 ]
 
 [build-system]
