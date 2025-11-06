@@ -139,11 +139,27 @@ class InferenceConfig:
     detection_threshold: float = 0.8
     detector_weights: Optional[str] = None
     detector_confidence: float = 0.3
+    database: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.checkpoint_path = str(Path(self.checkpoint_path))
         if self.detector_weights:
             self.detector_weights = str(Path(self.detector_weights))
+        if isinstance(self.database, dict):
+            defaults = {
+                "host": "localhost",
+                "port": 5432,
+                "name": "facenet",
+                "user": "facenet_user",
+                "password": "facenet_pass",
+                "table": "face_embeddings",
+                "sslmode": None,
+            }
+            merged = {**defaults, **self.database}
+            merged["port"] = int(merged.get("port") or 5432)
+            self.database = merged
+        else:
+            raise ValueError("database configuration must be a mapping.")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

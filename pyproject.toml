@@ -16,6 +16,8 @@ dependencies = [
     "gradio>=4.44.0",
     "supervision>=0.26.1",
     "omegaconf>=2.3.0",
+    "pgvector>=0.2.5",
+    "psycopg[binary,pool]>=3.2.3",
 ]
 
 [build-system]

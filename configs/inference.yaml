@@ -7,3 +7,11 @@ image_size: 160
 detection_threshold: 0.8
 detector_weights: model/yolov8n-face.pt
 detector_confidence: 0.3
+database:
+    host: localhost
+    port: 5434
+    name: facenet
+    user: postgres
+    password: postgres
+    table: face_embeddings
+    sslmode: null

@@ -74,6 +74,8 @@ class EmbeddingService:
         self.cfg = cfg
         self.device = torch.device(cfg.device)
         self.model = _load_model_from_checkpoint(cfg.checkpoint_path, self.device)
+        self.model_cfg = self.model.model_cfg  # type: ignore[attr-defined]
+        self.embedding_dim = getattr(self.model_cfg, "embedding_dim", None)
         self.transform = build_eval_transform(cfg.image_size)
         self.detector = self._load_detector()
         self.box_annotator = (
@@ -231,6 +233,22 @@ class EmbeddingService:
                 raise ValueError(str(exc)) from exc
             tensors.append(tensor)
         return self._embed_tensors(tensors)
+
+    @torch.inference_mode()
+    def embeddings_with_visuals(
+        self, images: List[Image.Image]
+    ) -> tuple[np.ndarray, List[Image.Image]]:
+        tensors: List[torch.Tensor] = []
+        visuals: List[Image.Image] = []
+        for image in images:
+            try:
+                tensor, visual = self._preprocess_image(image, return_visual=True)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            tensors.append(tensor)
+            visuals.append(visual)
+        embeddings = self._embed_tensors(tensors)
+        return embeddings.numpy(), visuals
 
     @torch.inference_mode()
     def verify(self, image_a: str, image_b: str, threshold: float) -> VerifyResponse:

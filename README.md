@@ -84,17 +84,25 @@ curl -X POST http://localhost:8000/verify \
 
 The API returns cosine similarity scores and match decisions.
 If you set `detector_weights` in `configs/inference.yaml` to a local Ultralytics YOLO face-detector checkpoint (e.g. `yolov8n-face.pt`), incoming images are cropped to the strongest detected face before embedding.
+Update the `database` block in `configs/inference.yaml` with your Postgres host, credentials, and table so the Gradio registration/search features can persist embeddings via pgvector.
 
-## Gradio verification demo
+## Gradio recognition studio
 
-Launch an interactive UI for manual image comparison:
+Launch an interactive UI for registration, verification, and vector search:
 
 ```bash
 python scripts/gradio_verify.py --config configs/inference.yaml
 ```
 
-Upload two photos (full frames are fine); the app will optionally run YOLO-based face detection using the configured weights, crop the faces, and report cosine similarity versus the chosen threshold.
-If detection is active, the UI renders bounding boxes using Roboflow Supervision for quick visual confirmation.
+The app reads Postgres connection info from `configs/inference.yaml` (see `database:` block); override those values there before launching.
+
+Features:
+
+- **Register** tab: label an identity, upload a face, and persist the embedding via pgLite + pgvector.
+- **Verify** tab: compare two faces (cosine similarity vs. threshold).
+- **Search** tab: embed a query face and retrieve top-K nearest identities from the vector store.
+
+Full-frame uploads are fine; YOLO (when configured) crops to a square face region, and Roboflow Supervision overlays the bounding boxes for visual confirmation.
 
 ## Production considerations
 
