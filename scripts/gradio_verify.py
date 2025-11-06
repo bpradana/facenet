@@ -125,25 +125,36 @@ def build_interface(
         with gr.Tabs():
             with gr.Tab("Register"):
                 with gr.Row():
-                    name_input = gr.Textbox(label="Identity Name", placeholder="Jane Doe")
-                    notes_input = gr.Textbox(
-                        label="Notes (optional)", placeholder="Source, context, etc."
-                    )
-                register_image = gr.Image(
-                    label="Registration Image",
-                    type="pil",
-                    image_mode="RGB",
-                )
-                register_btn = gr.Button("Register Identity", variant="primary")
-                annotated_reg = gr.Image(label="Detected Face")
-                register_status = gr.JSON(label="Registration Status")
-                identities_table = gr.Dataframe(
-                    headers=["Identity"],
-                    datatype=["str"],
-                    interactive=False,
-                    label="Registered Identities",
-                    value=initial_identities,
-                )
+                    with gr.Column(scale=1):
+                        name_input = gr.Textbox(
+                            label="Identity Name", placeholder="Jane Doe"
+                        )
+                        notes_input = gr.Textbox(
+                            label="Notes (optional)",
+                            placeholder="Source, context, etc.",
+                        )
+                        register_image = gr.Image(
+                            label="Registration Image",
+                            type="pil",
+                            image_mode="RGB",
+                        )
+                        register_btn = gr.Button(
+                            "Register Identity", variant="primary"
+                        )
+                    with gr.Column(scale=1):
+                        annotated_reg = gr.Image(
+                            label="Detected Face", interactive=False
+                        )
+                        register_status = gr.JSON(label="Registration Status")
+                        identities_table = gr.Dataframe(
+                            headers=["Identity"],
+                            datatype=["str"],
+                            interactive=False,
+                            row_count=(0, "dynamic"),
+                            col_count=(1, "fixed"),
+                            label="Registered Identities",
+                            value=initial_identities,
+                        )
                 register_btn.click(
                     fn=register_face,
                     inputs=[name_input, register_image, notes_input],
@@ -173,27 +184,39 @@ def build_interface(
                 )
 
             with gr.Tab("Search"):
-                search_image = gr.Image(
-                    label="Query Image", type="pil", image_mode="RGB"
-                )
-                top_k = gr.Slider(
-                    minimum=1,
-                    maximum=20,
-                    value=5,
-                    step=1,
-                    label="Top-K Results",
-                )
-                search_btn = gr.Button("Search Database", variant="primary")
-                annotated_query = gr.Image(label="Detected Query Face")
-                search_results = gr.Dataframe(
-                    headers=["identity", "similarity", "distance", "created_at"],
-                    datatype=["str", "number", "number", "str"],
-                    interactive=False,
-                    row_count=(0, "dynamic"),
-                    col_count=(4, "fixed"),
-                    label="Search Results",
-                )
-                search_status = gr.JSON(label="Search Summary")
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        search_image = gr.Image(
+                            label="Query Image", type="pil", image_mode="RGB"
+                        )
+                        top_k = gr.Slider(
+                            minimum=1,
+                            maximum=20,
+                            value=5,
+                            step=1,
+                            label="Top-K Results",
+                        )
+                        search_btn = gr.Button(
+                            "Search Database", variant="primary"
+                        )
+                    with gr.Column(scale=1):
+                        annotated_query = gr.Image(
+                            label="Detected Query Face", interactive=False
+                        )
+                        search_results = gr.Dataframe(
+                            headers=[
+                                "identity",
+                                "similarity",
+                                "distance",
+                                "created_at",
+                            ],
+                            datatype=["str", "number", "number", "str"],
+                            interactive=False,
+                            row_count=(0, "dynamic"),
+                            col_count=(4, "fixed"),
+                            label="Search Results",
+                        )
+                        search_status = gr.JSON(label="Search Summary")
                 search_btn.click(
                     fn=search_faces,
                     inputs=[search_image, top_k],
