@@ -129,7 +129,7 @@ class PostgresEmbeddingStore:
     ) -> list[SearchResult]:
         vector = np.asarray(query_embedding, dtype=np.float32)
         operator = {
-            "cosine": "<->",
+            "cosine": "<=>",
             "l2": "<->",
             "inner": "<#>",
         }.get(self.distance_metric, "<->")
@@ -158,7 +158,7 @@ class PostgresEmbeddingStore:
             distance = float(row["distance"])
             similarity = (
                 1.0 - (distance**2) / 2.0
-                if self.distance_metric in ("cosine", "l2")
+                if self.distance_metric in ("l2")
                 else 1.0 - distance
             )
             metadata = row.get("metadata")
