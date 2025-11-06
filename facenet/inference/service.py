@@ -235,6 +235,21 @@ class EmbeddingService:
         return self._embed_tensors(tensors)
 
     @torch.inference_mode()
+    def encode_faces(self, faces: List[Image.Image]) -> np.ndarray:
+        if not faces:
+            return np.empty((0, self.model_cfg.embedding_dim), dtype=np.float32)
+
+        tensors = [
+            self.transform(face.convert("RGB")).unsqueeze(0).to(self.device)
+            for face in faces
+        ]
+        batch = torch.cat(tensors, dim=0)
+        embeddings = self.model(batch)
+        if self.cfg.normalize_embeddings:
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        return embeddings.cpu().numpy()
+
+    @torch.inference_mode()
     def embeddings_with_visuals(
         self, images: List[Image.Image]
     ) -> tuple[np.ndarray, List[Image.Image]]:

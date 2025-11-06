@@ -94,15 +94,25 @@ Launch an interactive UI for registration, verification, and vector search:
 python scripts/gradio_verify.py --config configs/inference.yaml
 ```
 
-The app reads Postgres connection info from `configs/inference.yaml` (see `database:` block); override those values there before launching.
+The app reads Postgres connection info from `configs/inference.yaml` (see `database:` block); update those values before launching.
 
 Features:
 
-- **Register** tab: label an identity, upload a face, and persist the embedding via pgLite + pgvector.
+- **Register** tab: label an identity, upload a face, and persist the embedding via Postgres + pgvector.
 - **Verify** tab: compare two faces (cosine similarity vs. threshold).
 - **Search** tab: embed a query face and retrieve top-K nearest identities from the vector store.
 
 Full-frame uploads are fine; YOLO (when configured) crops to a square face region, and Roboflow Supervision overlays the bounding boxes for visual confirmation.
+
+### Live detection & identification
+
+Stream from a webcam, detect faces, and label them against the database:
+
+```bash
+python scripts/live_detect.py --config configs/inference.yaml
+```
+
+Press `q` to exit. Optional flags (`--camera`, `--top-k`, `--min-similarity`, `--show-similarity`) control runtime behavior. The script expects YOLO weights (`detector_weights`) and Postgres credentials in `configs/inference.yaml`, and renders bounding boxes plus identity labels in real time.
 
 ## Production considerations
 
