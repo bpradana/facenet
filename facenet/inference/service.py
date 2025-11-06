@@ -125,18 +125,63 @@ class EmbeddingService:
             raise ValueError("No face detected in the provided image.")
 
         confidences = detections.confidence
-        if confidences.size == 0:
-            idx = 0
-        else:
+        has_conf = confidences is not None and confidences.size > 0
+        if has_conf:
             idx = int(np.argmax(confidences))
+            conf_value = float(confidences[idx])
+        else:
+            idx = 0
+            conf_value = 0.0
 
-        x1, y1, x2, y2 = detections.xyxy[idx].astype(int)
+        x1, y1, x2, y2 = detections.xyxy[idx].astype(float)
         width, height = image.size
-        x1 = max(0, min(width - 1, x1))
-        y1 = max(0, min(height - 1, y1))
-        x2 = max(x1 + 1, min(width, x2))
-        y2 = max(y1 + 1, min(height, y2))
-        face = image.crop((x1, y1, x2, y2))
+        box_w = x2 - x1
+        box_h = y2 - y1
+        side = min(max(box_w, box_h), float(width), float(height))
+        half = side / 2.0
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+
+        new_x1 = cx - half
+        new_y1 = cy - half
+        new_x2 = cx + half
+        new_y2 = cy + half
+
+        if new_x1 < 0:
+            new_x2 -= new_x1
+            new_x1 = 0.0
+        if new_y1 < 0:
+            new_y2 -= new_y1
+            new_y1 = 0.0
+        if new_x2 > width:
+            shift = new_x2 - width
+            new_x1 -= shift
+            new_x2 = float(width)
+        if new_y2 > height:
+            shift = new_y2 - height
+            new_y1 -= shift
+            new_y2 = float(height)
+
+        new_x1 = max(0.0, new_x1)
+        new_y1 = max(0.0, new_y1)
+        new_x2 = min(float(width), new_x2)
+        new_y2 = min(float(height), new_y2)
+
+        side = min(new_x2 - new_x1, new_y2 - new_y1)
+        new_x2 = new_x1 + side
+        new_y2 = new_y1 + side
+
+        x1_i = int(np.floor(new_x1))
+        y1_i = int(np.floor(new_y1))
+        x2_i = int(np.ceil(new_x2))
+        y2_i = int(np.ceil(new_y2))
+
+        if x2_i <= x1_i:
+            x2_i = min(width, x1_i + 1)
+        if y2_i <= y1_i:
+            y2_i = min(height, y1_i + 1)
+
+        face = image.crop((x1_i, y1_i, x2_i, y2_i))
 
         annotated = None
         if draw:
@@ -144,8 +189,13 @@ class EmbeddingService:
                 annotated = image
             else:
                 scene = np.array(image.convert("RGB"))
+                square_detection = sv.Detections(
+                    xyxy=np.array([[x1_i, y1_i, x2_i, y2_i]], dtype=np.float32),
+                    confidence=np.array([conf_value], dtype=np.float32),
+                    class_id=np.zeros(1, dtype=int),
+                )
                 annotated_scene = self.box_annotator.annotate(
-                    scene=scene, detections=detections
+                    scene=scene, detections=square_detection
                 )
                 annotated = Image.fromarray(annotated_scene)
 
