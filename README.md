@@ -113,4 +113,4 @@ Full-frame uploads are fine; YOLO (when configured) crops to a square face regio
 
 ## License
 
-MIT (update as appropriate for your use case).
+MIT.
