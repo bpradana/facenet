@@ -84,6 +84,16 @@ curl -X POST http://localhost:8000/verify \
 
 The API returns cosine similarity scores and match decisions.
 
+## Gradio verification demo
+
+Launch an interactive UI for manual image comparison:
+
+```bash
+python scripts/gradio_verify.py --config configs/inference.yaml
+```
+
+Upload two face crops and adjust the cosine threshold to see match results.
+
 ## Production considerations
 
 - Configure `trainer.devices` and `trainer.accelerator` to leverage GPUs.

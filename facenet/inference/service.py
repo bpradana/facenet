@@ -64,6 +64,10 @@ class EmbeddingService:
         self.model = _load_model_from_checkpoint(cfg.checkpoint_path, self.device)
         self.transform = build_eval_transform(cfg.image_size)
 
+    def _preprocess_image(self, image: Image.Image) -> torch.Tensor:
+        img = image.convert("RGB")
+        return self.transform(img).unsqueeze(0).to(self.device)
+
     def _decode_image(self, image_b64: str) -> torch.Tensor:
         try:
             image_bytes = base64.b64decode(image_b64)
@@ -73,22 +77,41 @@ class EmbeddingService:
             ) from exc
 
         with Image.open(io.BytesIO(image_bytes)) as img:
-            img = img.convert("RGB")
-        tensor = self.transform(img).unsqueeze(0).to(self.device)
+            tensor = self._preprocess_image(img)
         return tensor
 
     @torch.inference_mode()
     def embed(self, images_b64: List[str]) -> torch.Tensor:
         tensors = [self._decode_image(image) for image in images_b64]
+        return self._embed_tensors(tensors)
+
+    @torch.inference_mode()
+    def embed_images(self, images: List[Image.Image]) -> torch.Tensor:
+        tensors = [self._preprocess_image(image) for image in images]
+        return self._embed_tensors(tensors)
+
+    @torch.inference_mode()
+    def verify(self, image_a: str, image_b: str, threshold: float) -> VerifyResponse:
+        embeddings = self.embed([image_a, image_b])
+        return self._verify_from_embeddings(embeddings, threshold)
+
+    @torch.inference_mode()
+    def verify_images(
+        self, image_a: Image.Image, image_b: Image.Image, threshold: float
+    ) -> VerifyResponse:
+        embeddings = self.embed_images([image_a, image_b])
+        return self._verify_from_embeddings(embeddings, threshold)
+
+    def _embed_tensors(self, tensors: List[torch.Tensor]) -> torch.Tensor:
         batch = torch.cat(tensors, dim=0)
         embeddings = self.model(batch)
         if self.cfg.normalize_embeddings:
             embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
         return embeddings.cpu()
 
-    @torch.inference_mode()
-    def verify(self, image_a: str, image_b: str, threshold: float) -> VerifyResponse:
-        embeddings = self.embed([image_a, image_b])
+    def _verify_from_embeddings(
+        self, embeddings: torch.Tensor, threshold: float
+    ) -> VerifyResponse:
         similarity = torch.nn.functional.cosine_similarity(
             embeddings[0].unsqueeze(0), embeddings[1].unsqueeze(0)
         ).item()
