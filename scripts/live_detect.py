@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Append similarity score to rendered labels.",
     )
+    parser.add_argument(
+        "--frames",
+        type=int,
+        default=1,
+        help="Number of consecutive frames to aggregate per identity (default: 1).",
+    )
     return parser.parse_args()
 
 
@@ -164,6 +170,9 @@ def main() -> None:
     if not cap.isOpened():
         raise RuntimeError(f"Unable to open camera index {args.camera}.")
 
+    max_frames = max(1, args.frames)
+    similarity_buffer: dict[str, List[float]] = {}
+
     try:
         while True:
             ret, frame = cap.read()
@@ -201,6 +210,7 @@ def main() -> None:
 
             if faces:
                 embeddings = service.encode_faces(faces)
+                current_labels: List[Tuple[str, float]] = []
                 for idx, embedding in enumerate(embeddings):
                     matches = store.search(embedding, top_k=args.top_k)
                     if not matches:
@@ -209,11 +219,33 @@ def main() -> None:
                     best = matches[0]
                     if best.similarity < args.min_similarity:
                         labels[idx] = "Unknown"
-                    else:
-                        label = best.identity
-                        if args.show_similarity:
-                            label = f"{label} ({best.similarity:.2f})"
-                        labels[idx] = label
+                        continue
+
+                    labels[idx] = best.identity
+                    current_labels.append((best.identity, best.similarity))
+
+                for identity, similarity in current_labels:
+                    buf = similarity_buffer.setdefault(identity, [])
+                    buf.append(similarity)
+                    if len(buf) > max_frames:
+                        buf.pop(0)
+                # prune old identities not seen in current frame
+                tracked = {identity for identity, _ in current_labels}
+                for identity in list(similarity_buffer.keys()):
+                    if identity not in tracked:
+                        buf = similarity_buffer[identity]
+                        if len(buf) >= max_frames:
+                            similarity_buffer.pop(identity)
+
+                # update labels with averaged similarity
+                for idx, identity in enumerate(labels):
+                    if identity in similarity_buffer and identity != "Unknown":
+                        scores = similarity_buffer[identity]
+                        avg_sim = sum(scores) / len(scores)
+                        if avg_sim < args.min_similarity:
+                            labels[idx] = "Unknown"
+                        elif args.show_similarity:
+                            labels[idx] = f"{identity} ({avg_sim:.2f})"
 
             for (sx1, sy1, sx2, sy2), label in zip(boxes, labels):
                 color = (0, 255, 0) if label and label != "Unknown" else (0, 0, 255)
