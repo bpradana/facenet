@@ -47,19 +47,21 @@ def build_interface(
             return None, {"error": "Embedding store is not configured."}, []
         name = (name or "").strip()
         if not name:
-            return None, {"error": "Name is required."}, to_identity_table(
-                store.list_identities()
+            return (
+                None,
+                {"error": "Name is required."},
+                to_identity_table(store.list_identities()),
             )
         if image is None:
-            return None, {"error": "Please upload an image."}, to_identity_table(
-                store.list_identities()
+            return (
+                None,
+                {"error": "Please upload an image."},
+                to_identity_table(store.list_identities()),
             )
         try:
             embeddings, visuals = service.embeddings_with_visuals([image])
         except ValueError as exc:
-            return None, {"error": str(exc)}, to_identity_table(
-                store.list_identities()
-            )
+            return None, {"error": str(exc)}, to_identity_table(store.list_identities())
         metadata = {"notes": notes} if notes else None
         inserted = store.register(name, embeddings, metadata=metadata)
         identities = store.list_identities()
@@ -138,9 +140,7 @@ def build_interface(
                             type="pil",
                             image_mode="RGB",
                         )
-                        register_btn = gr.Button(
-                            "Register Identity", variant="primary"
-                        )
+                        register_btn = gr.Button("Register Identity", variant="primary")
                     with gr.Column(scale=1):
                         annotated_reg = gr.Image(
                             label="Detected Face", interactive=False
@@ -196,9 +196,7 @@ def build_interface(
                             step=1,
                             label="Top-K Results",
                         )
-                        search_btn = gr.Button(
-                            "Search Database", variant="primary"
-                        )
+                        search_btn = gr.Button("Search Database", variant="primary")
                     with gr.Column(scale=1):
                         annotated_query = gr.Image(
                             label="Detected Query Face", interactive=False

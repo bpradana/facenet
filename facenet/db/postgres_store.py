@@ -252,13 +252,13 @@ class PostgresEmbeddingStore:
                     pass
             results.append(
                 SearchResult(
-                        id=row["id"],
-                        identity=row["identity"],
-                        similarity=similarity,
-                        distance=distance,
-                        metadata=metadata,
-                        created_at=row.get("created_at"),
-                    )
+                    id=row["id"],
+                    identity=row["identity"],
+                    similarity=similarity,
+                    distance=distance,
+                    metadata=metadata,
+                    created_at=row.get("created_at"),
+                )
             )
         return results
 

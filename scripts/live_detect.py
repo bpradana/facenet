@@ -168,7 +168,9 @@ class FaceTrack:
         self.ready: bool = False
         self.last_seen: int = 0
 
-    def update(self, center: Tuple[float, float], embedding: np.ndarray, frame_idx: int) -> None:
+    def update(
+        self, center: Tuple[float, float], embedding: np.ndarray, frame_idx: int
+    ) -> None:
         self.center = center
         self.embeddings.append(np.asarray(embedding, dtype=np.float32))
         self.last_seen = frame_idx

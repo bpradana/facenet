@@ -1,0 +1,64 @@
+# Default benchmark sweep used by scripts/benchmark.py
+training:
+    seed: 42
+    data:
+        root: dataset/indonesian-face
+        image_size: 160
+        batch_size: 32
+        num_workers: 4
+        classes_per_batch: 16
+        samples_per_class: 2
+        val_split: 0.3
+        shuffle: true
+        min_images_per_class: 2
+        augmentations: true
+        cache_dataset: false
+    model:
+        pretrained: true
+        dropout: 0.2
+        margin: 0.5
+        train_backbone: true
+    optimizer:
+        name: adamw
+        lr: 0.0003
+        weight_decay: 0.0001
+        betas: [0.9, 0.999]
+    scheduler:
+        name: cosine
+        t_max: 30
+        warmup_steps: 500
+    trainer:
+        max_epochs: 1
+        devices: 1
+        accelerator: auto
+        precision: 32-true
+        accumulate_grad_batches: 1
+        gradient_clip_val: 0.0
+        deterministic: true
+        enable_progress_bar: true
+    logging:
+        output_dir: artifacts
+        checkpoint_interval: 1
+        checkpoint_top_k: 3
+        monitor: val/loss
+        mode: min
+        log_every_n_steps: 50
+
+output_dir: artifacts/benchmark
+backbones:
+    - resnet18
+    - resnet34
+    # - resnet50
+    # - resnext50_32x4d
+embedding_dims:
+    - 8
+    - 16
+    # - 256
+    # - 512
+    # - 1024
+inference_batch_size: 64
+top_k: 5
+num_random_queries: 2
+gallery_split: val
+device: auto
+# query_image: path/to/optional/probe.jpg

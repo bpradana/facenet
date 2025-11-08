@@ -114,6 +114,29 @@ python scripts/live_detect.py --config configs/inference.yaml
 
 Press `q` to exit. Optional flags (`--camera`, `--top-k`, `--min-similarity`, `--show-similarity`) control runtime behavior. The script expects YOLO weights (`detector_weights`) and Postgres credentials in `configs/inference.yaml`, and renders bounding boxes plus identity labels in real time.
 
+## Benchmark suite
+
+Use `scripts/benchmark.py` to sweep architectures/embedding sizes, log verification metrics, and generate paper-ready figures plus qualitative retrieval panels.
+
+```bash
+python scripts/benchmark.py \
+    --benchmark-config configs/benchmark.yaml
+```
+
+Outputs land in `artifacts/benchmark/` by default:
+- Per-run Lightning checkpoints/logs under `artifacts/benchmark/<run_name>/`.
+- `benchmark_results.json` capturing val metrics, TAR/FAR, and timing data.
+- `benchmark_accuracy.png` plotting accuracy vs. embedding dimension for each backbone.
+- `benchmark_report.md` linking the plot plus query-vs-top-K panels so you can paste the visuals straight into a paper or deck.
+- `embedding_dim_<dim>_queries.png` grids: columns are `1 + top_k`, rows are backbones sorted by accuracy for that embedding size.
+- `backbone_<name>_queries.png` grids: columns are `1 + top_k`, rows are embedding sizes sorted from largest to smallest for that backbone.
+
+Optional flags include `--query-image` (force a specific probe image), `--gallery-split` (`val`/`train`/`all`), `--inference-batch-size`, and `--device` to control evaluation hardware. The script reuses the training block defined inside the benchmark YAML for optimizer, scheduler, and dataloading, so any edit you make there automatically propagates to every benchmark run.
+
+The file `configs/benchmark.yaml` captures both the base training hyperparameters (`training:` block) and the sweep definition (backbones, embedding dims, output dir, etc.). Only include shared model settings (dropout, margin, etc.) inside `training.model`; the per-run backbone + embedding dimensionality comes from the sweep section or the optional `experiments` list, so you don’t need to duplicate them.
+
+Advanced users can create another YAML with the same structure, point `--benchmark-config` to it, or provide an `experiments` list to enumerate arbitrary `(backbone, embedding_dim)` pairs instead of using cross-product sweeps. The aggregated query grids respect the requested ordering (best-to-worst accuracy rows for each embedding dimension; largest-to-smallest embeddings for each backbone), making them camera-ready for papers.
+
 ## Production considerations
 
 - Configure `trainer.devices` and `trainer.accelerator` to leverage GPUs.
