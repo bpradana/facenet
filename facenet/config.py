@@ -33,7 +33,7 @@ class DataConfig:
 class ModelConfig:
     """Definition of the embedding network."""
 
-    backbone: Literal["resnet18", "resnet34", "resnet50"] = "resnet50"
+    backbone: str = "resnet50"
     embedding_dim: int = 512
     pretrained: bool = True
     dropout: float = 0.0

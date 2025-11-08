@@ -46,16 +46,16 @@ training:
 
 output_dir: artifacts/benchmark
 backbones:
-    - resnet18
-    - resnet34
-    # - resnet50
-    # - resnext50_32x4d
+    - mobilenet_v3_small
+    - mnasnet0_5
+    - shufflenet_v2_x0_5
+    - squeezenet1_0
 embedding_dims:
+    - 2
+    - 4
     - 8
     - 16
-    # - 256
-    # - 512
-    # - 1024
+    - 32
 inference_batch_size: 64
 top_k: 5
 num_random_queries: 2

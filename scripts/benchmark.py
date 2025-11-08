@@ -8,7 +8,7 @@ import json
 import random
 import textwrap
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from itertools import product
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -19,10 +19,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
-from PIL import Image
+import yaml
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
-import yaml
+from PIL import Image
 
 from facenet.config import ModelConfig, OptimizerConfig, SchedulerConfig, TrainingConfig
 from facenet.data import FaceDataModule
@@ -761,6 +761,21 @@ def _draw_image(ax, path: Path, title: str) -> None:
 
 
 def plot_results(results: List[ExperimentResult], output_root: Path) -> Path:
+    markers = [
+        ".",
+        "o",
+        "v",
+        "^",
+        "1",
+        "2",
+        "s",
+        "p",
+        "*",
+        "D",
+        "P",
+        "X",
+    ]
+
     if not results:
         raise ValueError("No experiment results to plot.")
 
@@ -771,11 +786,11 @@ def plot_results(results: List[ExperimentResult], output_root: Path) -> Path:
         grouped.setdefault(backbone, []).append((result.spec.embedding_dim, acc))
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    for backbone, pairs in grouped.items():
+    for i, (backbone, pairs) in enumerate(grouped.items()):
         pairs.sort(key=lambda item: item[0])
         dims = [p[0] for p in pairs]
         accs = [p[1] for p in pairs]
-        ax.plot(dims, accs, marker="o", label=backbone)
+        ax.plot(dims, accs, marker=markers[i % len(markers)], label=backbone)
 
     ax.set_xlabel("Embedding Dimension")
     ax.set_ylabel("Verification Accuracy")
