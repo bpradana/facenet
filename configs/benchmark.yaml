@@ -2,7 +2,7 @@
 training:
     seed: 42
     data:
-        root: dataset/indonesian-face
+        root: dataset/ilfw
         image_size: 160
         batch_size: 32
         num_workers: 4
@@ -28,7 +28,7 @@ training:
         t_max: 30
         warmup_steps: 500
     trainer:
-        max_epochs: 1
+        max_epochs: 10
         devices: 1
         accelerator: auto
         precision: 32-true
@@ -47,15 +47,18 @@ training:
 output_dir: artifacts/benchmark
 backbones:
     - mobilenet_v3_small
-    - mnasnet0_5
+    - mobilenet_v3_large
+    - efficientnet_v2_s
+    - efficientnet_v2_m
     - shufflenet_v2_x0_5
-    - squeezenet1_0
+    - shufflenet_v2_x2_0
 embedding_dims:
-    - 2
-    - 4
-    - 8
     - 16
     - 32
+    - 64
+    - 128
+    - 256
+    - 512
 inference_batch_size: 64
 top_k: 5
 num_random_queries: 2

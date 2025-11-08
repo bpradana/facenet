@@ -71,6 +71,9 @@ class ExperimentResult:
     query_visualizations: List[QueryVisualization]
 
 
+RUN_RESULT_FILENAME = "run_result.json"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train/evaluate multiple FaceNet variants and generate benchmark visuals."
@@ -137,6 +140,13 @@ def parse_args() -> argparse.Namespace:
         choices=["val", "train", "all"],
         default=None,
         help="Which identity split to visualize in retrieval examples.",
+    )
+    parser.add_argument(
+        "--resume/--no-resume",
+        dest="resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Skip runs that already produced artifacts and reuse their metrics.",
     )
     args = parser.parse_args()
     overrides = load_benchmark_overrides(args.benchmark_config)
@@ -386,7 +396,7 @@ def run_single_experiment(
         verification_metrics.get("far", float("nan")),
     )
 
-    return ExperimentResult(
+    result = ExperimentResult(
         spec=spec,
         run_dir=run_dir,
         checkpoint_path=best_ckpt,
@@ -395,6 +405,8 @@ def run_single_experiment(
         training_seconds=training_seconds,
         query_visualizations=query_visualizations,
     )
+    save_run_result(result)
+    return result
 
 
 def load_model_from_checkpoint(
@@ -653,6 +665,87 @@ def save_query_figure(
     plt.close(fig)
 
 
+def result_to_dict(result: ExperimentResult) -> Dict[str, Any]:
+    return {
+        "spec": asdict(result.spec),
+        "run_dir": str(result.run_dir),
+        "checkpoint_path": str(result.checkpoint_path),
+        "val_metrics": result.val_metrics,
+        "verification_metrics": result.verification_metrics,
+        "training_seconds": result.training_seconds,
+        "query_visualizations": [asdict(viz) for viz in result.query_visualizations],
+    }
+
+
+def dict_to_result(
+    data: Dict[str, Any], *, spec_override: Optional[ExperimentSpec] = None
+) -> ExperimentResult:
+    spec_dict = data.get("spec") or {}
+    spec = spec_override or ExperimentSpec(
+        idx=int(spec_dict.get("idx", 0)),
+        backbone=spec_dict.get("backbone", "unknown"),
+        embedding_dim=int(spec_dict.get("embedding_dim", 0)),
+    )
+    run_dir = Path(data.get("run_dir", spec.run_name))
+    checkpoint_path = Path(data.get("checkpoint_path", ""))
+    val_metrics = {k: float(v) for k, v in (data.get("val_metrics") or {}).items()}
+    verification_metrics = {
+        k: float(v) for k, v in (data.get("verification_metrics") or {}).items()
+    }
+    training_seconds = float(data.get("training_seconds", 0.0))
+    query_visualizations = [
+        QueryVisualization(**viz)
+        for viz in data.get("query_visualizations", [])
+        if isinstance(viz, dict)
+    ]
+    return ExperimentResult(
+        spec=spec,
+        run_dir=run_dir,
+        checkpoint_path=checkpoint_path,
+        val_metrics=val_metrics,
+        verification_metrics=verification_metrics,
+        training_seconds=training_seconds,
+        query_visualizations=query_visualizations,
+    )
+
+
+def save_run_result(result: ExperimentResult) -> Path:
+    path = result.run_dir / RUN_RESULT_FILENAME
+    path.write_text(json.dumps(result_to_dict(result), indent=2), encoding="utf-8")
+    return path
+
+
+def load_existing_result(
+    spec: ExperimentSpec, output_root: Path
+) -> Optional[ExperimentResult]:
+    run_dir = output_root / spec.run_name
+    meta_path = run_dir / RUN_RESULT_FILENAME
+    if not meta_path.exists():
+        return None
+    try:
+        data = json.loads(meta_path.read_text())
+    except Exception as exc:  # pragma: no cover - corrupted metadata
+        logger.warning("Could not parse %s: %s", meta_path, exc)
+        return None
+
+    stored_spec = data.get("spec") or {}
+    if (
+        stored_spec.get("backbone") != spec.backbone
+        or int(stored_spec.get("embedding_dim", -1)) != spec.embedding_dim
+    ):
+        return None
+
+    result = dict_to_result(data, spec_override=spec)
+    if not result.checkpoint_path.exists():
+        logger.warning(
+            "[%s] Checkpoint missing at %s. Run will be re-executed.",
+            spec.run_name,
+            result.checkpoint_path,
+        )
+        return None
+    return result
+
+
 def create_embedding_dim_query_grids(
     results: List[ExperimentResult], top_k: int, output_root: Path
 ) -> Dict[int, Path]:
@@ -883,21 +976,7 @@ def write_report(
 
 def save_results_json(results: List[ExperimentResult], output_root: Path) -> Path:
     path = output_root / "benchmark_results.json"
-    serializable = []
-    for result in results:
-        serializable.append(
-            {
-                "spec": asdict(result.spec),
-                "run_dir": str(result.run_dir),
-                "checkpoint_path": str(result.checkpoint_path),
-                "val_metrics": result.val_metrics,
-                "verification_metrics": result.verification_metrics,
-                "training_seconds": result.training_seconds,
-                "query_visualizations": [
-                    asdict(viz) for viz in result.query_visualizations
-                ],
-            }
-        )
+    serializable = [result_to_dict(result) for result in results]
     path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
     return path
 
@@ -926,9 +1005,17 @@ def main() -> None:
 
     results: List[ExperimentResult] = []
     for spec in specs:
-        results.append(
-            run_single_experiment(spec, cfg, args, args.output_dir, eval_device)
-        )
+        existing = load_existing_result(spec, args.output_dir) if args.resume else None
+        if existing:
+            logger.info(
+                "[%s] Resuming from %s",
+                spec.run_name,
+                existing.checkpoint_path,
+            )
+            results.append(existing)
+            continue
+        result = run_single_experiment(spec, cfg, args, args.output_dir, eval_device)
+        results.append(result)
 
     plot_path = plot_results(results, args.output_dir)
     embedding_dim_grids = create_embedding_dim_query_grids(
