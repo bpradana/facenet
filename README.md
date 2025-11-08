@@ -84,7 +84,7 @@ curl -X POST http://localhost:8000/verify \
 
 The API returns cosine similarity scores and match decisions.
 If you set `detector_weights` in `configs/inference.yaml` to a local Ultralytics YOLO face-detector checkpoint (e.g. `yolov8n-face.pt`), incoming images are cropped to the strongest detected face before embedding.
-Update the `database` block in `configs/inference.yaml` with your Postgres host, credentials, and table so the Gradio registration/search features can persist embeddings via pgvector.
+Update the `database` block in `configs/inference.yaml` with your Postgres host, credentials, and table names so the Gradio registration/search features can persist embeddings via pgvector. The service now maintains two tables: `identities` (one centroid embedding per user plus metadata) and `embeddings` (all raw samples). Every registration inserts the raw vectors and recomputes the centroid stored in `identities`, and search compares queries against those centroids.
 
 ## Gradio recognition studio
 

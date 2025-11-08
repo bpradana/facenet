@@ -13,5 +13,6 @@ database:
     name: facenet
     user: postgres
     password: postgres
-    table: face_embeddings
+    table: embeddings
+    identity_table: identities
     sslmode: null

@@ -153,6 +153,7 @@ class InferenceConfig:
                 "user": "facenet_user",
                 "password": "facenet_pass",
                 "table": "face_embeddings",
+                "identity_table": None,
                 "sslmode": None,
             }
             merged = {**defaults, **self.database}

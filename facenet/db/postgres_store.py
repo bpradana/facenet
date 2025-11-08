@@ -60,12 +60,14 @@ class PostgresEmbeddingStore:
         table_name: str,
         embedding_dim: int,
         *,
+        identities_table: Optional[str] = None,
         lists: int = 100,
         distance_metric: str = "cosine",
     ) -> None:
         self.config = config
         self.dsn = config.build_dsn()
-        self.table_name = table_name
+        self.embeddings_table = table_name
+        self.identities_table = identities_table or f"{table_name}_identities"
         self.embedding_dim = embedding_dim
         self.lists = lists
         self.distance_metric = distance_metric
@@ -78,13 +80,32 @@ class PostgresEmbeddingStore:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
                 cur.execute(
                     f"""
-                    CREATE TABLE IF NOT EXISTS {self.table_name} (
+                    CREATE TABLE IF NOT EXISTS {self.identities_table} (
                         id SERIAL PRIMARY KEY,
-                        identity TEXT NOT NULL,
+                        identity TEXT UNIQUE NOT NULL,
+                        centroid vector({self.embedding_dim}) NOT NULL,
+                        embedding_count INTEGER NOT NULL DEFAULT 0,
+                        metadata JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    );
+                    """
+                )
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.embeddings_table} (
+                        id SERIAL PRIMARY KEY,
+                        identity_id INTEGER NOT NULL REFERENCES {self.identities_table}(id) ON DELETE CASCADE,
                         embedding vector({self.embedding_dim}) NOT NULL,
                         metadata JSONB,
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     );
+                    """
+                )
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {self.embeddings_table}_identity_idx
+                    ON {self.embeddings_table} (identity_id);
                     """
                 )
 
@@ -100,26 +121,88 @@ class PostgresEmbeddingStore:
             vector = np.asarray(embedding, dtype=np.float32)
             payloads.append(
                 {
-                    "identity": identity,
                     "embedding": vector,
-                    "metadata": Json(metadata) if metadata is not None else None,
                 }
             )
 
         if not payloads:
             return 0
 
-        with psycopg.connect(self.dsn, autocommit=True) as conn:
+        metadata_json = Json(metadata) if metadata is not None else None
+
+        with psycopg.connect(self.dsn, autocommit=False) as conn:
             register_vector(conn)
             with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, centroid, embedding_count
+                    FROM {self.identities_table}
+                    WHERE identity = %s
+                    FOR UPDATE;
+                    """,
+                    (identity,),
+                )
+                row = cur.fetchone()
+
+                vectors = np.stack([p["embedding"] for p in payloads])
+                inserted = vectors.shape[0]
+                new_centroid = vectors.mean(axis=0)
+                embedding_count = inserted
+                identity_id: Optional[int] = None
+
+                if row is not None:
+                    identity_id = int(row[0])
+                    existing_centroid = np.asarray(row[1], dtype=np.float32)
+                    existing_count = int(row[2])
+                    total = existing_count + inserted
+                    if existing_count > 0:
+                        aggregate = existing_centroid * existing_count + vectors.sum(
+                            axis=0
+                        )
+                        new_centroid = aggregate / total
+                    embedding_count = total
+                    params: list[Any] = [new_centroid, embedding_count]
+                    update_sql = f"""
+                        UPDATE {self.identities_table}
+                        SET centroid = %s,
+                            embedding_count = %s,
+                            updated_at = NOW()
+                    """
+                    if metadata_json is not None:
+                        update_sql += ", metadata = %s"
+                        params.append(metadata_json)
+                    update_sql += " WHERE id = %s;"
+                    params.append(identity_id)
+                    cur.execute(update_sql, tuple(params))
+                else:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {self.identities_table} (identity, centroid, embedding_count, metadata)
+                        VALUES (%s, %s, %s, %s)
+                        RETURNING id;
+                        """,
+                        (identity, new_centroid, embedding_count, metadata_json),
+                    )
+                    identity_id = int(cur.fetchone()[0])
+
+                assert identity_id is not None
+                embedding_rows = [
+                    {
+                        "identity_id": identity_id,
+                        "embedding": vector,
+                        "metadata": Json(metadata) if metadata is not None else None,
+                    }
+                    for vector in vectors
+                ]
                 cur.executemany(
                     f"""
-                    INSERT INTO {self.table_name} (identity, embedding, metadata)
-                    VALUES (%(identity)s, %(embedding)s, %(metadata)s);
+                    INSERT INTO {self.embeddings_table} (identity_id, embedding, metadata)
+                    VALUES (%(identity_id)s, %(embedding)s, %(metadata)s);
                     """,
-                    payloads,
+                    embedding_rows,
                 )
-        return len(payloads)
+            conn.commit()
+        return inserted
 
     def search(
         self,
@@ -144,9 +227,9 @@ class PostgresEmbeddingStore:
                         identity,
                         metadata,
                         created_at,
-                        embedding {operator} %s AS distance
-                    FROM {self.table_name}
-                    ORDER BY embedding {operator} %s
+                        centroid {operator} %s AS distance
+                    FROM {self.identities_table}
+                    ORDER BY centroid {operator} %s
                     LIMIT %s;
                     """,
                     (vector, vector, top_k),
@@ -169,13 +252,13 @@ class PostgresEmbeddingStore:
                     pass
             results.append(
                 SearchResult(
-                    id=row["id"],
-                    identity=row["identity"],
-                    similarity=similarity,
-                    distance=distance,
-                    metadata=metadata,
-                    created_at=row.get("created_at"),
-                )
+                        id=row["id"],
+                        identity=row["identity"],
+                        similarity=similarity,
+                        distance=distance,
+                        metadata=metadata,
+                        created_at=row.get("created_at"),
+                    )
             )
         return results
 
@@ -185,8 +268,8 @@ class PostgresEmbeddingStore:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT DISTINCT identity
-                    FROM {self.table_name}
+                    SELECT identity
+                    FROM {self.identities_table}
                     ORDER BY identity;
                     """
                 )
@@ -197,6 +280,6 @@ class PostgresEmbeddingStore:
         with psycopg.connect(self.dsn, autocommit=True) as conn:
             register_vector(conn)
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) FROM {self.table_name};")
+                cur.execute(f"SELECT COUNT(*) FROM {self.identities_table};")
                 value = cur.fetchone()
         return int(value[0]) if value else 0

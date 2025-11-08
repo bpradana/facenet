@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Deque, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -70,6 +71,7 @@ def build_store(cfg: InferenceConfig, embedding_dim: int) -> PostgresEmbeddingSt
     db_user = db_cfg.get("user")
     db_password = db_cfg.get("password")
     db_table = db_cfg.get("table", "face_embeddings")
+    db_identity_table = db_cfg.get("identity_table")
     db_sslmode = db_cfg.get("sslmode")
 
     if not (db_host and db_name and db_user):
@@ -86,7 +88,12 @@ def build_store(cfg: InferenceConfig, embedding_dim: int) -> PostgresEmbeddingSt
         password=db_password or "",
         sslmode=db_sslmode,
     )
-    return PostgresEmbeddingStore(pg_config, db_table, embedding_dim=embedding_dim)
+    return PostgresEmbeddingStore(
+        pg_config,
+        db_table,
+        embedding_dim=embedding_dim,
+        identities_table=db_identity_table,
+    )
 
 
 def load_detector(weights_path: Path) -> YOLO:
@@ -149,6 +156,46 @@ def to_square_bbox(
     return x1_i, y1_i, x2_i, y2_i
 
 
+class FaceTrack:
+    """Track state for a face across multiple frames."""
+
+    def __init__(self, max_frames: int) -> None:
+        self.max_frames = max_frames
+        self.center: Tuple[float, float] = (0.0, 0.0)
+        self.embeddings: Deque[np.ndarray] = deque(maxlen=max_frames)
+        self.identity: Optional[str] = None
+        self.similarity: float = 0.0
+        self.ready: bool = False
+        self.last_seen: int = 0
+
+    def update(self, center: Tuple[float, float], embedding: np.ndarray, frame_idx: int) -> None:
+        self.center = center
+        self.embeddings.append(np.asarray(embedding, dtype=np.float32))
+        self.last_seen = frame_idx
+
+
+def match_track(
+    tracks: List[FaceTrack],
+    center: Tuple[float, float],
+    max_distance: float,
+    max_frames: int,
+) -> FaceTrack:
+    best_track: Optional[FaceTrack] = None
+    best_dist = max_distance
+    cx, cy = center
+    for track in tracks:
+        tx, ty = track.center
+        dist = float(np.hypot(cx - tx, cy - ty))
+        if dist < best_dist:
+            best_dist = dist
+            best_track = track
+    if best_track is None:
+        best_track = FaceTrack(max_frames)
+        best_track.center = center
+        tracks.append(best_track)
+    return best_track
+
+
 def main() -> None:
     args = parse_args()
     cfg: InferenceConfig = load_config(args.config, config_type=InferenceConfig)
@@ -171,13 +218,16 @@ def main() -> None:
         raise RuntimeError(f"Unable to open camera index {args.camera}.")
 
     max_frames = max(1, args.frames)
-    similarity_buffer: dict[str, List[float]] = {}
+    tracks: List[FaceTrack] = []
+    frame_idx = 0
+    max_track_distance = 80.0
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+            frame_idx += 1
 
             frame_height, frame_width = frame.shape[:2]
             results = detector.predict(frame, conf=confidence, verbose=False)
@@ -206,46 +256,57 @@ def main() -> None:
                     )
                     faces.append(crop)
 
-            labels: List[Optional[str]] = [None] * len(boxes)
-
             if faces:
                 embeddings = service.encode_faces(faces)
-                current_labels: List[Tuple[str, float]] = []
-                for idx, embedding in enumerate(embeddings):
-                    matches = store.search(embedding, top_k=args.top_k)
+                detection_tracks: List[FaceTrack] = []
+                for (sx1, sy1, sx2, sy2), embedding in zip(boxes, embeddings):
+                    center = ((sx1 + sx2) / 2.0, (sy1 + sy2) / 2.0)
+                    track = match_track(tracks, center, max_track_distance, max_frames)
+                    track.update(center, embedding, frame_idx)
+                    detection_tracks.append(track)
+                    if store is None:
+                        continue
+                    ready = (
+                        max_frames == 1
+                        or len(track.embeddings) == track.embeddings.maxlen
+                    )
+                    if not ready:
+                        continue
+                    stacked = np.stack(track.embeddings, axis=0)
+                    avg_embedding = stacked.mean(axis=0)
+                    matches = store.search(avg_embedding, top_k=args.top_k)
+                    track.ready = True
                     if not matches:
-                        labels[idx] = "Unknown"
+                        track.identity = None
+                        track.similarity = 0.0
                         continue
                     best = matches[0]
                     if best.similarity < args.min_similarity:
-                        labels[idx] = "Unknown"
+                        track.identity = None
+                        track.similarity = best.similarity
+                    else:
+                        track.identity = best.identity
+                        track.similarity = best.similarity
+
+                # prune stale tracks
+                tracks = [
+                    t for t in tracks if frame_idx - t.last_seen <= max_frames * 2
+                ]
+
+                labels: List[Optional[str]] = []
+                for track in detection_tracks:
+                    if not track.ready:
+                        labels.append(None)
                         continue
-
-                    labels[idx] = best.identity
-                    current_labels.append((best.identity, best.similarity))
-
-                for identity, similarity in current_labels:
-                    buf = similarity_buffer.setdefault(identity, [])
-                    buf.append(similarity)
-                    if len(buf) > max_frames:
-                        buf.pop(0)
-                # prune old identities not seen in current frame
-                tracked = {identity for identity, _ in current_labels}
-                for identity in list(similarity_buffer.keys()):
-                    if identity not in tracked:
-                        buf = similarity_buffer[identity]
-                        if len(buf) >= max_frames:
-                            similarity_buffer.pop(identity)
-
-                # update labels with averaged similarity
-                for idx, identity in enumerate(labels):
-                    if identity in similarity_buffer and identity != "Unknown":
-                        scores = similarity_buffer[identity]
-                        avg_sim = sum(scores) / len(scores)
-                        if avg_sim < args.min_similarity:
-                            labels[idx] = "Unknown"
-                        elif args.show_similarity:
-                            labels[idx] = f"{identity} ({avg_sim:.2f})"
+                    if track.identity is None:
+                        labels.append("Unknown")
+                        continue
+                    if args.show_similarity:
+                        labels.append(f"{track.identity} ({track.similarity:.2f})")
+                    else:
+                        labels.append(track.identity)
+            else:
+                labels = []
 
             for (sx1, sy1, sx2, sy2), label in zip(boxes, labels):
                 color = (0, 255, 0) if label and label != "Unknown" else (0, 0, 255)

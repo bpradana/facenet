@@ -242,6 +242,7 @@ def main() -> None:
     db_user = db_cfg.get("user")
     db_password = db_cfg.get("password")
     db_table = db_cfg.get("table", "face_embeddings")
+    db_identity_table = db_cfg.get("identity_table")
     db_sslmode = db_cfg.get("sslmode")
 
     if db_host and db_name and db_user:
@@ -257,6 +258,7 @@ def main() -> None:
             pg_config,
             db_table,
             embedding_dim=int(embedding_dim),
+            identities_table=db_identity_table,
         )
 
     demo = build_interface(service, store)

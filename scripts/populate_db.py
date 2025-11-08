@@ -31,12 +31,6 @@ def parse_args() -> argparse.Namespace:
         help="Path to dataset (folders per identity).",
     )
     parser.add_argument(
-        "--limit",
-        type=int,
-        default=1,
-        help="Number of random images per identity to register (default: 1).",
-    )
-    parser.add_argument(
         "--shuffle",
         action="store_true",
         help="Shuffle identities before insertion.",
@@ -62,15 +56,6 @@ def discover_identities(dataset_path: Path) -> List[tuple[str, List[Path]]]:
     return identities
 
 
-def sample_images(
-    images: List[Path], limit: int, rng: np.random.Generator
-) -> List[Path]:
-    if len(images) <= limit:
-        return images
-    indices = rng.choice(len(images), size=limit, replace=False)
-    return [images[i] for i in indices]
-
-
 def build_store(cfg: InferenceConfig, embedding_dim: int) -> PostgresEmbeddingStore:
     db_cfg = cfg.database or {}
     db_host = db_cfg.get("host")
@@ -79,6 +64,7 @@ def build_store(cfg: InferenceConfig, embedding_dim: int) -> PostgresEmbeddingSt
     db_user = db_cfg.get("user")
     db_password = db_cfg.get("password")
     db_table = db_cfg.get("table", "face_embeddings")
+    db_identity_table = db_cfg.get("identity_table")
     db_sslmode = db_cfg.get("sslmode")
 
     if not (db_host and db_name and db_user):
@@ -95,7 +81,12 @@ def build_store(cfg: InferenceConfig, embedding_dim: int) -> PostgresEmbeddingSt
         password=db_password or "",
         sslmode=db_sslmode,
     )
-    return PostgresEmbeddingStore(pg_config, db_table, embedding_dim=embedding_dim)
+    return PostgresEmbeddingStore(
+        pg_config,
+        db_table,
+        embedding_dim=embedding_dim,
+        identities_table=db_identity_table,
+    )
 
 
 def load_image(path: Path) -> Image.Image:
@@ -119,17 +110,14 @@ def main() -> None:
     if args.shuffle:
         rng = np.random.default_rng()
         rng.shuffle(identities)
-    else:
-        rng = np.random.default_rng()
 
     print(f"Found {len(identities)} identities in {dataset_path}")
 
     samples: List[tuple[str, List[Path]]] = []
     for identity, image_paths in identities:
-        selected = sample_images(image_paths, args.limit, rng)
-        if not selected:
+        if not image_paths:
             continue
-        samples.append((identity, selected))
+        samples.append((identity, image_paths))
 
     if args.dry_run:
         for identity, image_paths in samples:
