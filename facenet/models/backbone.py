@@ -26,7 +26,8 @@ class FaceEmbeddingNet(nn.Module):
         super().__init__()
 
         backbone = _load_backbone(backbone_name, pretrained)
-        in_features = _strip_classifier(backbone)
+        backbone = _strip_classifier(backbone)
+        backbone, in_features = _prepare_feature_backbone(backbone)
 
         if not train_backbone:
             for param in backbone.parameters():
@@ -77,16 +78,38 @@ def _load_backbone(name: str, pretrained: bool) -> nn.Module:
         raise ValueError(f"Unsupported backbone '{name}': {exc}") from exc
 
 
-def _strip_classifier(backbone: nn.Module) -> int:
-    parent, key, classifier_module = _locate_classifier(backbone)
-    in_features = _extract_in_features(classifier_module)
+def _strip_classifier(backbone: nn.Module) -> nn.Module:
+    try:
+        parent, key, _ = _locate_classifier(backbone)
+    except ValueError:
+        return backbone
 
     if isinstance(key, int):
         parent[key] = nn.Identity()
     else:
         setattr(parent, key, nn.Identity())
+    return backbone
 
-    return in_features
+
+def _prepare_feature_backbone(backbone: nn.Module) -> tuple[nn.Module, int]:
+    was_training = backbone.training
+    backbone.eval()
+    sample = torch.zeros(1, 3, 224, 224)
+    with torch.no_grad():
+        out = backbone(sample)
+    if was_training:
+        backbone.train()
+
+    if out.ndim == 4:
+        feature_dim = out.shape[1]
+        backbone = nn.Sequential(backbone, nn.AdaptiveAvgPool2d((1, 1)), nn.Flatten(1))
+        return backbone, feature_dim
+    if out.ndim == 3:
+        feature_dim = out.shape[-1]
+        backbone = nn.Sequential(backbone, nn.Flatten(1))
+        return backbone, feature_dim
+    feature_dim = out.shape[-1]
+    return backbone, feature_dim
 
 
 def _locate_classifier(backbone: nn.Module) -> Tuple[nn.Module, int | str, nn.Module]:
@@ -109,7 +132,7 @@ def _locate_classifier(backbone: nn.Module) -> Tuple[nn.Module, int | str, nn.Mo
             elif isinstance(module, nn.Linear):
                 return backbone, attr, module
 
-    name, module = _find_last_linear(backbone)
+    name, module = _find_last_linear_or_conv(backbone)
     parent, key = _resolve_parent(backbone, name)
     return parent, key, module
 
@@ -121,13 +144,13 @@ def _find_last_linear_index(seq: nn.Sequential) -> int | None:
     return None
 
 
-def _find_last_linear(backbone: nn.Module) -> Tuple[str, nn.Linear]:
-    last: Tuple[str, nn.Linear] | None = None
+def _find_last_linear_or_conv(backbone: nn.Module) -> Tuple[str, nn.Module]:
+    last: Tuple[str, nn.Module] | None = None
     for name, module in backbone.named_modules():
-        if isinstance(module, nn.Linear):
+        if isinstance(module, (nn.Linear, nn.Conv2d)):
             last = (name, module)
     if last is None:
-        raise ValueError("Backbone does not contain any linear layers to strip.")
+        raise ValueError("Backbone does not contain linear/conv classifier layers to strip.")
     return last
 
 
